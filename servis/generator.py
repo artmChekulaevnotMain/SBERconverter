@@ -9,10 +9,7 @@ GIGACHAT_TOKEN = "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLT
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-SYSTEM_PROMPT = """Ты генерируешь только TypeScript-код без пояснений.
-Функция: export default function parseFile(base64File: string): T[]
-Код ДОЛЖЕН сам: 1) декодировать base64 в строку, 2) распарсить исходный формат файла (CSV/JSON/XML/XLSX и тд), 3) замаппить поля в целевой интерфейс.
-Код обрабатывает ИСХОДНЫЙ ФАЙЛ, а не предобработанные данные. Используй только встроенные средства TypeScript/JavaScript (atob, DOMParser, split и тд)."""
+SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, комментариев, markdown. Функция parseFile(base64:string):T[] — декодирует base64, парсит исходный файл, маппит в целевой JSON."
 
 
 def get_access_token() -> str:
@@ -50,7 +47,7 @@ def call_gigachat(system_prompt: str, user_message: str) -> dict:
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.1,
-            "max_tokens": 1500,
+            "max_tokens": 800,
         },
         verify=False,
         timeout=120,
@@ -87,7 +84,7 @@ def generate_ts_code(
     else:
         tgt = "{}"
 
-    user_message = f"Формат файла: {file_format}\nСтруктура: {src}\nЦелевой JSON: {tgt}\nСгенерируй функцию которая парсит ИСХОДНЫЙ файл из base64 в этот формат."
+    user_message = f"Формат:{file_format} Колонки:{columns} Целевой:{tgt}"
 
     result = call_gigachat(SYSTEM_PROMPT, user_message)
     ts_code = clean_ts_code(result["content"])
@@ -101,10 +98,17 @@ def generate_ts_code(
 
 
 def clean_ts_code(code: str) -> str:
-    """Убирает markdown-обёртки из ответа LLM."""
+    """Убирает markdown-обёртки и пояснения из ответа LLM."""
     code = re.sub(r"^```(?:typescript|ts)?\s*\n", "", code.strip())
     code = re.sub(r"\n```\s*$", "", code.strip())
-    return code.strip()
+    # Убираем всё после последней закрывающей скобки функции
+    lines = code.split("\n")
+    result = []
+    for line in lines:
+        if line.startswith("**") or line.startswith("Примечание") or line.startswith("Для работы") or line.startswith("Эта функция"):
+            break
+        result.append(line)
+    return "\n".join(result).strip()
 
 
 def generate_ts_code_with_retry(

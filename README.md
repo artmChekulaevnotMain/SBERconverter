@@ -1,54 +1,74 @@
+# SberConverter
 
+Веб-приложение для автоматической генерации TypeScript-кода из табличных данных с помощью GigaChat AI.
 
-# Create venv
+Загрузите файл с данными (CSV, XLSX, JSON, XML, PDF и др.) и опционально пример целевого JSON — сервис сгенерирует готовую TypeScript-функцию для преобразования данных.
 
-```bash
-uv venv
-```
+## Структура проекта
 
-# Activating a virtual environment
-```bash
-source .venv/bin/activate
-```
+- `servis/` — бэкенд на FastAPI (парсинг файлов, генерация кода через GigaChat)
+- `sajt/` — фронтенд на React (интерфейс загрузки файлов и отображения кода)
+- `testy/` — тестовые файлы для проверки работы
 
-# Install dependencies
+## Требования
 
-```bash
-uv sync
-```
+- Python 3.10+
+- Node.js 16+
+- npm
 
-# Run app
+## Установка и запуск
 
-## Configure environments
-
-```bash
-mv .env.example .env
-```
-
-Add your creds `GIGACHAT_CREDENTIALS`. If creds personal, set `GIGACHAT_SCOPE=GIGACHAT_API_PERS`
-
-More information about gigachat env look [here](GIGACHAT_SCOPE=GIGACHAT_API_CORP)
-
-
-## Run in console
-```bash
-PYTHONPATH=src python src/main.py
-```
-
-## Run debug (vs code)
-
-Just run Python Debugger: FastAPI
-
-# Available endpoints
-- `/` - simple chat (fastui)
-- `/api/v1/prediction` - api
-
-# Curl example
+### 1. Установите зависимости бэкенда
 
 ```bash
-curl --location 'localhost:8000/api/v1/prediction' \
---header 'Content-Type: application/json' \
---data '{
-    "message": "hello"
-}'
+pip install -r requirements.txt
 ```
+
+### 2. Установите зависимости фронтенда
+
+```bash
+cd sajt
+npm install
+```
+
+### 3. Запустите бэкенд
+
+```bash
+cd servis
+python -m uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+Сервер запустится на http://localhost:8000
+
+### 4. Запустите фронтенд
+
+```bash
+cd sajt
+npm start
+```
+
+Сайт откроется на http://localhost:3000
+
+## Как пользоваться
+
+1. Откройте http://localhost:3000 в браузере
+2. В первое поле загрузите файл с табличными данными (CSV, XLSX, JSON, XML, PDF, DOCX, HTML или изображение)
+3. Во второе поле (необязательно) загрузите пример JSON — как должны выглядеть данные после преобразования
+4. Нажмите кнопку "Загрузите файлы"
+5. Дождитесь генерации — на экране появится готовый TypeScript-код
+6. Скопируйте код кнопкой "Копировать" или скачайте как .ts файл
+
+## Поддерживаемые форматы
+
+- CSV (с автоопределением разделителя)
+- XLSX / XLS
+- JSON
+- XML
+- PDF (извлечение таблиц)
+- DOCX
+- HTML
+- PNG / JPG (OCR-распознавание текста)
+
+## Настройка токена GigaChat
+
+Токен задаётся в файле `servis/generator.py` в переменной `GIGACHAT_TOKEN`. Для получения токена зарегистрируйтесь на developers.sber.ru.

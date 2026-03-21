@@ -190,12 +190,11 @@ class DocxParser(BaseParser):
 
 class PdfParser(BaseParser):
     def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
-        import fitz  # PyMuPDF
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(file_bytes))
         all_text = ""
-        for page in doc:
-            all_text += page.get_text() + "\n"
-        doc.close()
+        for page in reader.pages:
+            all_text += (page.extract_text() or "") + "\n"
         lines = [l.strip() for l in all_text.split("\n") if l.strip()]
         if not lines:
             return ParsedData(columns=[], sample_rows=[], dtypes={})

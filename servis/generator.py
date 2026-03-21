@@ -9,7 +9,10 @@ GIGACHAT_TOKEN = "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLT
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-SYSTEM_PROMPT = """Генерируй только TypeScript-код. Функция: export default function(base64file: string): T[]. Декодируй base64, парси формат, маппи поля в целевой JSON. Без пояснений."""
+SYSTEM_PROMPT = """Ты генерируешь только TypeScript-код без пояснений.
+Функция: export default function parseFile(base64File: string): T[]
+Код ДОЛЖЕН сам: 1) декодировать base64 в строку, 2) распарсить исходный формат файла (CSV/JSON/XML/XLSX и тд), 3) замаппить поля в целевой интерфейс.
+Код обрабатывает ИСХОДНЫЙ ФАЙЛ, а не предобработанные данные. Используй только встроенные средства TypeScript/JavaScript (atob, DOMParser, split и тд)."""
 
 
 def get_access_token() -> str:
@@ -76,7 +79,7 @@ def generate_ts_code(
     sample = file_structure.get("sample_rows", [])[:1]
     sep = file_structure.get("separator", ",")
 
-    src = json.dumps({"fmt": file_format, "sep": sep, "cols": columns, "row": sample[0] if sample else {}}, ensure_ascii=False)
+    src = json.dumps({"format": file_format, "separator": sep, "columns": columns, "sample_row": sample[0] if sample else {}}, ensure_ascii=False)
 
     if target_json:
         t = target_json[0] if isinstance(target_json, list) and target_json else target_json
@@ -84,7 +87,7 @@ def generate_ts_code(
     else:
         tgt = "{}"
 
-    user_message = f"Src:{src}\nTarget:{tgt}"
+    user_message = f"Формат файла: {file_format}\nСтруктура: {src}\nЦелевой JSON: {tgt}\nСгенерируй функцию которая парсит ИСХОДНЫЙ файл из base64 в этот формат."
 
     result = call_gigachat(SYSTEM_PROMPT, user_message)
     ts_code = clean_ts_code(result["content"])

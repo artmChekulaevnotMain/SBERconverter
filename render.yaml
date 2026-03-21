@@ -2,12 +2,8 @@ services:
   - type: web
     name: sberconverter
     runtime: python
-    buildCommand: "pip install -r requirements.txt && cd sajt && npm install && DISABLE_ESLINT_PLUGIN=true npm run build"
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "cd servis && uvicorn app:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.6"
-      - key: NODE_VERSION
-        value: "18.19.0"
-      - key: GIGACHAT_TOKEN
-        value: "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLTgxMTUtNGYwZC1iNzAyLWVkYjg4Y2UxNDI4YQ=="

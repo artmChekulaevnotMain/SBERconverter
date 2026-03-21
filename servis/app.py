@@ -5,12 +5,16 @@ from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from parsery import get_parser, SUPPORTED_FORMATS, ParsedData
 from generator import generate_ts_code_with_retry
 
 app = FastAPI(title="Генератор TypeScript-кода")
+
+# Путь к React-билду
+BUILD_DIR = Path(__file__).parent.parent / "sajt" / "build"
 
 app.add_middleware(
     CORSMiddleware,
@@ -104,6 +108,19 @@ async def parse_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"Ошибка парсинга: {str(e)}")
 
     return JSONResponse(content=parsed.to_dict())
+
+
+# Раздаём статику React-билда
+if BUILD_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(BUILD_DIR / "static")), name="static")
+
+    @app.get("/{full_path:path}")
+    async def serve_react(full_path: str):
+        """Все остальные запросы отдают React SPA."""
+        file_path = BUILD_DIR / full_path
+        if full_path and file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(BUILD_DIR / "index.html"))
 
 
 if __name__ == "__main__":

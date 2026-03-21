@@ -58,7 +58,8 @@ function App() {
         formData.append('target_json', jsonText);
       }
 
-      const response = await fetch('http://localhost:8000/generate', {
+      const apiUrl = window.location.hostname === 'localhost' ? 'http://localhost:8000/generate' : '/generate';
+      const response = await fetch(apiUrl, {
         method: 'POST',
         body: formData,
       });

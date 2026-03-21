@@ -1,17 +1,14 @@
-"""Парсеры файлов разных форматов."""
+"""Парсеры файлов разных форматов (без pandas)."""
 import csv
 import io
 import json
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
-from typing import Any
-
-import pandas as pd
 
 
 class ParsedData:
     """Результат парсинга файла."""
-    def __init__(self, columns: list[str], sample_rows: list[dict], dtypes: dict, separator: str = ","):
+    def __init__(self, columns: list, sample_rows: list, dtypes: dict, separator: str = ","):
         self.columns = columns
         self.sample_rows = sample_rows
         self.dtypes = dtypes
@@ -31,47 +28,70 @@ class BaseParser(ABC):
     def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
         pass
 
-    def _infer_dtypes(self, df: pd.DataFrame) -> dict:
+    def _infer_dtypes(self, columns: list, rows: list) -> dict:
         result = {}
-        for col in df.columns:
-            sample = df[col].dropna()
-            if sample.empty:
+        for col in columns:
+            val = None
+            for row in rows:
+                if col in row and row[col] not in (None, ""):
+                    val = row[col]
+                    break
+            if val is None:
                 result[col] = "string"
-                continue
-            val = sample.iloc[0]
-            if isinstance(val, (int, float)):
-                result[col] = "number"
             elif isinstance(val, bool):
                 result[col] = "boolean"
+            elif isinstance(val, (int, float)):
+                result[col] = "number"
             else:
-                result[col] = "string"
+                try:
+                    float(val)
+                    result[col] = "number"
+                except (ValueError, TypeError):
+                    result[col] = "string"
         return result
 
 
 class CsvParser(BaseParser):
     def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
         text = file_bytes.decode("utf-8-sig")
-        # Определяем разделитель
         sniffer = csv.Sniffer()
         try:
             dialect = sniffer.sniff(text[:2000])
             sep = dialect.delimiter
         except csv.Error:
             sep = ";"
-        df = pd.read_csv(io.StringIO(text), sep=sep, nrows=100)
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes, separator=sep)
+        reader = csv.DictReader(io.StringIO(text), delimiter=sep)
+        columns = reader.fieldnames or []
+        rows = []
+        for i, row in enumerate(reader):
+            if i >= 3:
+                break
+            rows.append(dict(row))
+        dtypes = self._infer_dtypes(columns, rows)
+        return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes, separator=sep)
 
 
 class XlsxParser(BaseParser):
     def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
-        df = pd.read_excel(io.BytesIO(file_bytes), nrows=100)
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes)
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(file_bytes), read_only=True)
+        ws = wb.active
+        rows_data = []
+        columns = []
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i == 0:
+                columns = [str(c) if c else f"col_{j}" for j, c in enumerate(row)]
+            elif i <= 3:
+                row_dict = {}
+                for j, val in enumerate(row):
+                    if j < len(columns):
+                        row_dict[columns[j]] = val if val is not None else ""
+                rows_data.append(row_dict)
+            else:
+                break
+        wb.close()
+        dtypes = self._infer_dtypes(columns, rows_data)
+        return ParsedData(columns=columns, sample_rows=rows_data, dtypes=dtypes)
 
 
 class JsonParser(BaseParser):
@@ -81,11 +101,10 @@ class JsonParser(BaseParser):
             data = [data]
         if not isinstance(data, list) or len(data) == 0:
             return ParsedData(columns=[], sample_rows=[], dtypes={})
-        df = pd.DataFrame(data[:100])
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes)
+        columns = list(data[0].keys())
+        rows = data[:3]
+        dtypes = self._infer_dtypes(columns, rows)
+        return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
 
 
 class XmlParser(BaseParser):
@@ -103,94 +122,29 @@ class XmlParser(BaseParser):
                 rows.append(row)
         if not rows:
             return ParsedData(columns=[], sample_rows=[], dtypes={})
-        df = pd.DataFrame(rows[:100])
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes)
-
-
-class PdfParser(BaseParser):
-    def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
-        import pdfplumber
-        rows = []
-        columns = []
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            for page in pdf.pages[:5]:
-                tables = page.extract_tables()
-                for table in tables:
-                    if not table:
-                        continue
-                    if not columns and table[0]:
-                        columns = [str(c) for c in table[0]]
-                    for row in table[1:]:
-                        if row:
-                            rows.append(dict(zip(columns, [str(v) if v else "" for v in row])))
-        if not rows:
-            return ParsedData(columns=[], sample_rows=[], dtypes={})
-        df = pd.DataFrame(rows[:100])
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes)
-
-
-class DocxParser(BaseParser):
-    def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
-        from docx import Document
-        doc = Document(io.BytesIO(file_bytes))
-        rows = []
-        columns = []
-        for table in doc.tables:
-            header = [cell.text.strip() for cell in table.rows[0].cells]
-            if not columns:
-                columns = header
-            for row in table.rows[1:]:
-                vals = [cell.text.strip() for cell in row.cells]
-                rows.append(dict(zip(columns, vals)))
-        if not rows:
-            return ParsedData(columns=[], sample_rows=[], dtypes={})
-        df = pd.DataFrame(rows[:100])
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes)
+        columns = list(rows[0].keys())
+        sample = rows[:3]
+        dtypes = self._infer_dtypes(columns, sample)
+        return ParsedData(columns=columns, sample_rows=sample, dtypes=dtypes)
 
 
 class HtmlParser(BaseParser):
     def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(file_bytes.decode("utf-8-sig"), "html.parser")
-        tables = soup.find_all("table")
-        if not tables:
+        table = soup.find("table")
+        if not table:
             return ParsedData(columns=[], sample_rows=[], dtypes={})
-        dfs = pd.read_html(io.StringIO(str(tables[0])))
-        if not dfs:
+        header_row = table.find("tr")
+        if not header_row:
             return ParsedData(columns=[], sample_rows=[], dtypes={})
-        df = dfs[0].head(100)
-        columns = list(df.columns)
-        sample_rows = df.head(3).fillna("").to_dict(orient="records")
-        dtypes = self._infer_dtypes(df)
-        return ParsedData(columns=columns, sample_rows=sample_rows, dtypes=dtypes)
-
-
-class PngParser(BaseParser):
-    def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
-        from PIL import Image
-        import pytesseract
-        img = Image.open(io.BytesIO(file_bytes))
-        text = pytesseract.image_to_string(img, lang="rus+eng")
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        if len(lines) < 2:
-            return ParsedData(columns=[], sample_rows=[], dtypes={})
-        # Пробуем разделить по табуляции или |
-        sep = "\t" if "\t" in lines[0] else "|" if "|" in lines[0] else ";"
-        columns = [c.strip() for c in lines[0].split(sep)]
+        columns = [th.get_text(strip=True) for th in header_row.find_all(["th", "td"])]
         rows = []
-        for line in lines[1:4]:
-            vals = [v.strip() for v in line.split(sep)]
-            rows.append(dict(zip(columns, vals)))
-        dtypes = {c: "string" for c in columns}
+        for tr in table.find_all("tr")[1:4]:
+            cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
+            row = dict(zip(columns, cells))
+            rows.append(row)
+        dtypes = self._infer_dtypes(columns, rows)
         return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
 
 
@@ -200,13 +154,8 @@ PARSERS = {
     ".xlsx": XlsxParser,
     ".json": JsonParser,
     ".xml": XmlParser,
-    ".pdf": PdfParser,
-    ".docx": DocxParser,
     ".html": HtmlParser,
     ".htm": HtmlParser,
-    ".png": PngParser,
-    ".jpg": PngParser,
-    ".jpeg": PngParser,
 }
 
 

@@ -148,6 +148,76 @@ class HtmlParser(BaseParser):
         return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
 
 
+class DocxParser(BaseParser):
+    def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
+        from docx import Document
+        doc = Document(io.BytesIO(file_bytes))
+        # Ищем таблицу в документе
+        if doc.tables:
+            table = doc.tables[0]
+            columns = [cell.text.strip() for cell in table.rows[0].cells]
+            rows = []
+            for row in table.rows[1:4]:
+                row_dict = {}
+                for j, cell in enumerate(row.cells):
+                    if j < len(columns):
+                        row_dict[columns[j]] = cell.text.strip()
+                rows.append(row_dict)
+            dtypes = self._infer_dtypes(columns, rows)
+            return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
+        # Если таблиц нет — парсим строки как текстовые данные
+        lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        if not lines:
+            return ParsedData(columns=[], sample_rows=[], dtypes={})
+        # Пробуем разделить по табуляции или точке с запятой
+        sep = "\t" if "\t" in lines[0] else ";"
+        parts = lines[0].split(sep)
+        if len(parts) > 1:
+            columns = parts
+            rows = []
+            for line in lines[1:4]:
+                vals = line.split(sep)
+                row_dict = dict(zip(columns, vals))
+                rows.append(row_dict)
+            dtypes = self._infer_dtypes(columns, rows)
+            return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes, separator=sep)
+        # Просто текст — одна колонка
+        columns = ["text"]
+        rows = [{"text": line} for line in lines[:3]]
+        dtypes = {"text": "string"}
+        return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
+
+
+class PdfParser(BaseParser):
+    def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        all_text = ""
+        for page in doc:
+            all_text += page.get_text() + "\n"
+        doc.close()
+        lines = [l.strip() for l in all_text.split("\n") if l.strip()]
+        if not lines:
+            return ParsedData(columns=[], sample_rows=[], dtypes={})
+        # Пробуем найти табличные данные по разделителю
+        for sep in ["\t", ";", ","]:
+            parts = lines[0].split(sep)
+            if len(parts) > 1:
+                columns = [p.strip() for p in parts]
+                rows = []
+                for line in lines[1:4]:
+                    vals = [v.strip() for v in line.split(sep)]
+                    row_dict = dict(zip(columns, vals))
+                    rows.append(row_dict)
+                dtypes = self._infer_dtypes(columns, rows)
+                return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes, separator=sep)
+        # Просто текст
+        columns = ["text"]
+        rows = [{"text": line} for line in lines[:3]]
+        dtypes = {"text": "string"}
+        return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
+
+
 PARSERS = {
     ".csv": CsvParser,
     ".xls": XlsxParser,
@@ -156,6 +226,8 @@ PARSERS = {
     ".xml": XmlParser,
     ".html": HtmlParser,
     ".htm": HtmlParser,
+    ".docx": DocxParser,
+    ".pdf": PdfParser,
 }
 
 

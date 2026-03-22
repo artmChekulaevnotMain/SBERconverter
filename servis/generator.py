@@ -2,20 +2,59 @@
 import json
 import re
 import time
+import datetime
 import requests
 import uuid
-from langfuse import Langfuse
 
 GIGACHAT_TOKEN = "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLTgxMTUtNGYwZC1iNzAyLWVkYjg4Y2UxNDI4YQ=="
 
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-langfuse = Langfuse(
-    public_key="pk-lf-98279f8f-10d5-4cfb-b96c-c9c30ed6eaac",
-    secret_key="sk-lf-dfb386f4-7d40-46f9-8950-5c67ebca0b4f",
-    host="https://cloud.langfuse.com",
-)
+LANGFUSE_PUBLIC_KEY = "pk-lf-98279f8f-10d5-4cfb-b96c-c9c30ed6eaac"
+LANGFUSE_SECRET_KEY = "sk-lf-dfb386f4-7d40-46f9-8950-5c67ebca0b4f"
+LANGFUSE_HOST = "https://cloud.langfuse.com"
+
+
+def langfuse_log(trace_id: str, name: str, model: str, input_msgs: list, output: str, usage: dict, latency: float):
+    """Отправляет данные в LangFuse через REST API."""
+    try:
+        now = datetime.datetime.utcnow().isoformat() + "Z"
+        requests.post(
+            f"{LANGFUSE_HOST}/api/public/ingestion",
+            auth=(LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY),
+            json={"batch": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "trace-create",
+                    "timestamp": now,
+                    "body": {"id": trace_id, "name": name, "timestamp": now},
+                },
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": "generation-create",
+                    "timestamp": now,
+                    "body": {
+                        "traceId": trace_id,
+                        "name": "gigachat-completion",
+                        "model": model,
+                        "input": input_msgs,
+                        "output": output,
+                        "usage": {
+                            "input": usage.get("prompt_tokens", 0),
+                            "output": usage.get("completion_tokens", 0),
+                            "total": usage.get("total_tokens", 0),
+                        },
+                        "metadata": {"latency_seconds": round(latency, 2)},
+                        "startTime": now,
+                        "endTime": now,
+                    },
+                },
+            ]},
+            timeout=5,
+        )
+    except Exception:
+        pass  # Не ломаем основной поток
 
 SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, markdown, import. Код БРАУЗЕРНЫЙ. Для CSV: atob()+split по разделителю. Для JSON: JSON.parse(atob()). Для XML: new DOMParser(). ЗАПРЕЩЕНО: import, require, fs, Buffer. Функция parseFile(base64:string):T[]."
 
@@ -39,18 +78,11 @@ def get_access_token() -> str:
 
 def call_gigachat(system_prompt: str, user_message: str) -> dict:
     """Вызывает GigaChat API и возвращает ответ."""
-    trace = langfuse.trace(name="gigachat-generate", metadata={"model": "GigaChat-2-Max"})
-    generation = trace.generation(
-        name="ts-code-generation",
-        model="GigaChat-2-Max",
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
-        model_parameters={"temperature": 0.1, "max_tokens": 800},
-    )
-
     token = get_access_token()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
     start_time = time.time()
 
     response = requests.post(
@@ -62,10 +94,7 @@ def call_gigachat(system_prompt: str, user_message: str) -> dict:
         },
         json={
             "model": "GigaChat-2-Max",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": messages,
             "temperature": 0.1,
             "max_tokens": 800,
         },
@@ -79,16 +108,15 @@ def call_gigachat(system_prompt: str, user_message: str) -> dict:
     content = data["choices"][0]["message"]["content"]
     usage = data.get("usage", {})
 
-    generation.end(
+    langfuse_log(
+        trace_id=str(uuid.uuid4()),
+        name="gigachat-generate",
+        model="GigaChat-2-Max",
+        input_msgs=messages,
         output=content,
-        usage={
-            "input": usage.get("prompt_tokens", 0),
-            "output": usage.get("completion_tokens", 0),
-            "total": usage.get("total_tokens", 0),
-        },
-        metadata={"latency_seconds": round(latency, 2)},
+        usage=usage,
+        latency=latency,
     )
-    langfuse.flush()
 
     return {
         "content": content,

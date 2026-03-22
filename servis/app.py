@@ -1,4 +1,7 @@
 """FastAPI приложение — точка входа бэкенда."""
+import base64
+import csv
+import io
 import json
 import os
 from pathlib import Path
@@ -10,6 +13,18 @@ from fastapi.staticfiles import StaticFiles
 
 from parsery import get_parser, SUPPORTED_FORMATS, ParsedData
 from generator import generate_ts_code_with_retry
+
+BINARY_FORMATS = {".xlsx", ".xls", ".docx", ".pdf"}
+
+
+def parsed_to_csv(parsed: ParsedData) -> str:
+    """Конвертирует ParsedData в CSV-строку."""
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=parsed.columns)
+    writer.writeheader()
+    for row in parsed.sample_rows:
+        writer.writerow(row)
+    return output.getvalue()
 
 app = FastAPI(title="Генератор TypeScript-кода")
 
@@ -65,14 +80,23 @@ async def generate(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Невалидный JSON в target_json")
 
+    # Для бинарных форматов конвертируем в CSV и генерируем код для CSV
+    csv_base64_str = None
+    gen_format = ext
+    if ext in BINARY_FORMATS:
+        csv_text = parsed_to_csv(parsed)
+        csv_base64_str = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+        gen_format = ".csv"
+        parsed.separator = ","
+
     # Генерируем TypeScript-код
     result = generate_ts_code_with_retry(
         file_structure=parsed.to_dict(),
         target_json=parsed_target,
-        file_format=ext,
+        file_format=gen_format,
     )
 
-    return JSONResponse(content={
+    response = {
         "typescript_code": result.get("typescript_code", ""),
         "tokens_used": result.get("tokens_used", 0),
         "prompt_tokens": result.get("prompt_tokens", 0),
@@ -84,7 +108,11 @@ async def generate(
             "row_count": len(parsed.sample_rows),
         },
         "error": result.get("error"),
-    })
+    }
+    if csv_base64_str:
+        response["csv_base64"] = csv_base64_str
+
+    return JSONResponse(content=response)
 
 
 @app.post("/parse")

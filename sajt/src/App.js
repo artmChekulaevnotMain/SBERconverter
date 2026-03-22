@@ -13,6 +13,7 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [execResult, setExecResult] = useState(null);
   const [execError, setExecError] = useState('');
+  const [csvBase64, setCsvBase64] = useState(null);
 
   const handleDrop = useCallback((e, setter) => {
     e.preventDefault();
@@ -75,6 +76,7 @@ function App() {
       setTsCode(data.typescript_code);
       setFileInfo(data.file_info);
       setTokensUsed(data.tokens_used);
+      setCsvBase64(data.csv_base64 || null);
       setShowResult(true);
     } catch (err) {
       setError(err.message || 'Не удалось подключиться к серверу');
@@ -114,15 +116,21 @@ function App() {
     setExecError('');
     setExecResult(null);
     try {
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.readAsDataURL(dataFile);
-      });
+      let base64;
+      if (csvBase64) {
+        // Для бинарных форматов используем CSV от сервера
+        base64 = csvBase64;
+      } else {
+        base64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(dataFile);
+        });
+      }
       let jsCode = stripTypes(tsCode);
       // eslint-disable-next-line no-new-func
-      const fn = new Function('base64File', jsCode + '\nreturn parseFile(base64File);');
-      const result = fn(base64);
+      const fn = new Function('base64File', 'XLSX', jsCode + '\nreturn parseFile(base64File);');
+      const result = fn(base64, window.XLSX);
       // Если результат — Promise, ждём его
       const finalResult = result instanceof Promise ? await result : result;
       setExecResult(finalResult);
@@ -148,6 +156,9 @@ function App() {
     setTokensUsed(0);
     setDataFile(null);
     setJsonFile(null);
+    setCsvBase64(null);
+    setExecResult(null);
+    setExecError('');
   };
 
   if (showResult) {

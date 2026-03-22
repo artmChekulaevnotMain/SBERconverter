@@ -156,7 +156,7 @@ def generate_ts_code(
 
 
 def clean_ts_code(code: str) -> str:
-    """Убирает markdown-обёртки и пояснения из ответа LLM."""
+    """Убирает markdown-обёртки, пояснения и TS-типы из ответа LLM."""
     code = re.sub(r"^```(?:typescript|ts|javascript|js)?\s*\n", "", code.strip())
     code = re.sub(r"\n```\s*$", "", code.strip())
     # Убираем всё после последней закрывающей скобки функции
@@ -165,8 +165,25 @@ def clean_ts_code(code: str) -> str:
     for line in lines:
         if line.startswith("**") or line.startswith("Примечание") or line.startswith("Для работы") or line.startswith("Эта функция"):
             break
+        # Убираем TS-типы из объявления функции: function name(x: string): ReturnType { → function name(x) {
+        if re.match(r'\s*function\s+\w+\s*\(', line):
+            line = re.sub(
+                r'^(\s*)function\s+(\w+)\s*\(([^)]*)\).*$',
+                lambda m: '{indent}function {name}({params}) {{'.format(
+                    indent=m.group(1),
+                    name=m.group(2),
+                    params=re.sub(r'(\w+)\s*:\s*[^,)]+', r'\1', m.group(3)),
+                ),
+                line,
+            )
+        # const x: Type = → const x =
+        line = re.sub(r'(const|let|var)\s+(\w+)\s*:\s*\S+\s*=', r'\1 \2 =', line)
+        # Убираем as Type
+        line = re.sub(r'\s+as\s+\w+(?:\[\])?', '', line)
         result.append(line)
     code = "\n".join(result).strip()
+    # Убираем interface/type блоки
+    code = re.sub(r'(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?', '', code, flags=re.DOTALL)
     # Заключаем не-ASCII ключи объектов в кавычки: №: → "№":
     code = re.sub(r'(?<=[\{,\n])\s*([^\x00-\x7F][\w%\s]*)\s*:', lambda m: f' "{m.group(1).strip()}":', code)
     return code

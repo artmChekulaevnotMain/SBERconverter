@@ -89,6 +89,26 @@ function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const stripTypes = (code) => {
+    // Убираем interface/type блоки
+    let js = code.replace(/(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?/gs, '');
+    // Убираем export default
+    js = js.replace(/export\s+default\s+/g, '');
+    // Убираем аннотации типов: ": Type", ": Type[]", ": Record<string, any>", "as Type"
+    js = js.replace(/:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>/g, '');
+    js = js.replace(/:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,;)={\n])/g, '');
+    js = js.replace(/:\s*\w+\[\]\s*(?=[,;)={\n])/g, '');
+    js = js.replace(/:\s*\w+\s*(?=[,;)={\n])/g, function(match) {
+      if (/:\s*(const|let|var|return|if|else|for|while|new|typeof|void|null|undefined|true|false|function)\b/.test(match)) return match;
+      return '';
+    });
+    js = js.replace(/\bas\s+\w+/g, '');
+    // Убираем дженерики
+    js = js.replace(/<\w+(?:\[\])?>/g, '');
+    // event.target?.result — оставляем optional chaining
+    return js;
+  };
+
   const handleExecute = async () => {
     if (!dataFile || !tsCode) return;
     setExecError('');
@@ -99,26 +119,13 @@ function App() {
         reader.onload = () => resolve(reader.result.split(',')[1]);
         reader.readAsDataURL(dataFile);
       });
-      // Убираем TypeScript-типы и export для выполнения как JS
-      let jsCode = tsCode
-        .replace(/:\s*string/g, '')
-        .replace(/:\s*number/g, '')
-        .replace(/:\s*boolean/g, '')
-        .replace(/:\s*any/g, '')
-        .replace(/:\s*\w+\[\]/g, '')
-        .replace(/:\s*\w+/g, function(match) {
-          if (match.match(/:\s*(const|let|var|return|if|else|for|while|new|typeof|void|null|undefined|true|false|function|switch|case|break|default|throw|try|catch|finally)\b/)) return match;
-          return '';
-        })
-        .replace(/interface\s+\w+\s*\{[^}]*\}/g, '')
-        .replace(/export\s+default\s+/g, '')
-        .replace(/<[A-Z]\w*>/g, '');
+      let jsCode = stripTypes(tsCode);
       // eslint-disable-next-line no-new-func
-      const fn = new Function('base64File', jsCode.includes('function parseFile')
-        ? jsCode + '\nreturn parseFile(base64File);'
-        : jsCode + '\nreturn parseFile(base64File);');
+      const fn = new Function('base64File', jsCode + '\nreturn parseFile(base64File);');
       const result = fn(base64);
-      setExecResult(result);
+      // Если результат — Promise, ждём его
+      const finalResult = result instanceof Promise ? await result : result;
+      setExecResult(finalResult);
     } catch (err) {
       setExecError('Ошибка выполнения: ' + err.message);
     }

@@ -108,7 +108,10 @@ def clean_ts_code(code: str) -> str:
         if line.startswith("**") or line.startswith("Примечание") or line.startswith("Для работы") or line.startswith("Эта функция"):
             break
         result.append(line)
-    return "\n".join(result).strip()
+    code = "\n".join(result).strip()
+    # Заключаем не-ASCII ключи объектов в кавычки: №: → "№":
+    code = re.sub(r'(?<=[\{,\n])\s*([^\x00-\x7F][\w%\s]*)\s*:', lambda m: f' "{m.group(1).strip()}":', code)
+    return code
 
 
 def generate_ts_code_with_retry(

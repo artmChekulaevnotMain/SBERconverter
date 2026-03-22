@@ -56,7 +56,7 @@ def langfuse_log(trace_id: str, name: str, model: str, input_msgs: list, output:
     except Exception:
         pass  # Не ломаем основной поток
 
-SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, markdown, import. Код БРАУЗЕРНЫЙ. Для CSV: atob()+split по разделителю. Для JSON: JSON.parse(atob()). Для XML: new DOMParser(). ЗАПРЕЩЕНО: import, require, fs, Buffer. Функция parseFile(base64:string):T[]."
+SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, markdown, import. Код БРАУЗЕРНЫЙ. Для CSV: atob()+split по разделителю. Для JSON: JSON.parse(atob()). Для XML: new DOMParser(). ЗАПРЕЩЕНО: import, require, fs, Buffer, повторное использование _ в деструктуризации (используй _1,_2 и т.д.). Функция parseFile(base64:string):T[]."
 
 
 def get_access_token() -> str:

@@ -92,29 +92,31 @@ function App() {
   };
 
   const stripTypes = (code) => {
-    let js = code;
-    // 1. Убираем interface/type блоки
-    js = js.replace(/(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?/gs, '');
-    // 2. Убираем export default
-    js = js.replace(/export\s+default\s+/g, '');
-    // 3. Убираем return type: function parseFile(base64: string): ... {
-    // Находим "function имя(" и убираем всю типизацию из сигнатуры
-    js = js.replace(/function\s+(\w+)\s*\(([^)]*)\)\s*:[^{]*/g, (match, name, params) => {
-      // Убираем типы из параметров: base64: string → base64
-      const cleanParams = params.replace(/(\w+)\s*:\s*[^,)]+/g, '$1');
-      return `function ${name}(${cleanParams}) `;
-    });
-    // 4. Убираем типы параметров: (param: string, param2: number)
-    js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,)])/g, '$1$2');
-    js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>\s*(?=[,)])/g, '$1$2');
-    // 5. Убираем типы переменных: const x: Type = → const x =
-    js = js.replace(/(const|let|var)\s+(\w+)\s*:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>\s*=/g, '$1 $2 =');
-    js = js.replace(/(const|let|var)\s+(\w+)\s*:\s*[A-Za-z][\w]*(?:\[\])?\s*=/g, '$1 $2 =');
-    // 6. Убираем as Type
-    js = js.replace(/\s+as\s+\w+(?:\[\])?/g, '');
-    // 7. Убираем дженерики у вызовов: fn<Type>( → fn(
-    js = js.replace(/(\w)\s*<\s*\w+(?:\[\])?\s*>\s*\(/g, '$1(');
-    return js;
+    // Построчно убираем TS-типы, чтобы получить валидный JS
+    let lines = code.split('\n');
+    let result = [];
+    for (let line of lines) {
+      // Пропускаем interface/type объявления
+      if (/^\s*(?:export\s+)?(?:interface|type)\s+\w+/.test(line)) {
+        // Пропускаем до закрывающей }
+        continue;
+      }
+      // function parseFile(base64: string): ... { → function parseFile(base64) {
+      line = line.replace(/function\s+(\w+)\s*\(([^)]*)\)\s*:.*\{/, (m, name, params) => {
+        const clean = params.replace(/(\w+)\s*:\s*[^,)]+/g, '$1');
+        return `function ${name}(${clean}) {`;
+      });
+      // Стрелочные функции с типом: (x: string) => → (x) =>
+      line = line.replace(/(\(|,\s*)(\w+)\s*:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,)])/g, '$1$2');
+      // const x: Type = → const x =
+      line = line.replace(/(const|let|var)\s+(\w+)\s*:\s*\S+\s*=/g, '$1 $2 =');
+      // as Type
+      line = line.replace(/\s+as\s+\w+(?:\[\])?/g, '');
+      // export default
+      line = line.replace(/export\s+default\s+/g, '');
+      result.push(line);
+    }
+    return result.join('\n');
   };
 
   const handleExecute = async () => {

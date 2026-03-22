@@ -8,9 +8,10 @@ from abc import ABC, abstractmethod
 
 class ParsedData:
     """Результат парсинга файла."""
-    def __init__(self, columns: list, sample_rows: list, dtypes: dict, separator: str = ","):
+    def __init__(self, columns: list, sample_rows: list, dtypes: dict, separator: str = ",", all_rows: list = None):
         self.columns = columns
         self.sample_rows = sample_rows
+        self.all_rows = all_rows or sample_rows
         self.dtypes = dtypes
         self.separator = separator
 
@@ -76,22 +77,20 @@ class XlsxParser(BaseParser):
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(file_bytes), read_only=True)
         ws = wb.active
-        rows_data = []
+        all_rows = []
         columns = []
         for i, row in enumerate(ws.iter_rows(values_only=True)):
             if i == 0:
                 columns = [str(c) if c else f"col_{j}" for j, c in enumerate(row)]
-            elif i <= 3:
+            else:
                 row_dict = {}
                 for j, val in enumerate(row):
                     if j < len(columns):
                         row_dict[columns[j]] = val if val is not None else ""
-                rows_data.append(row_dict)
-            else:
-                break
+                all_rows.append(row_dict)
         wb.close()
-        dtypes = self._infer_dtypes(columns, rows_data)
-        return ParsedData(columns=columns, sample_rows=rows_data, dtypes=dtypes)
+        dtypes = self._infer_dtypes(columns, all_rows[:3])
+        return ParsedData(columns=columns, sample_rows=all_rows[:3], dtypes=dtypes, all_rows=all_rows)
 
 
 class JsonParser(BaseParser):
@@ -152,40 +151,59 @@ class DocxParser(BaseParser):
     def parse(self, file_bytes: bytes, filename: str = "") -> ParsedData:
         from docx import Document
         doc = Document(io.BytesIO(file_bytes))
-        # Ищем таблицу в документе
+        # Ищем таблицы в документе
         if doc.tables:
-            table = doc.tables[0]
-            columns = [cell.text.strip() for cell in table.rows[0].cells]
-            rows = []
-            for row in table.rows[1:4]:
-                row_dict = {}
-                for j, cell in enumerate(row.cells):
-                    if j < len(columns):
-                        row_dict[columns[j]] = cell.text.strip()
-                rows.append(row_dict)
-            dtypes = self._infer_dtypes(columns, rows)
-            return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
-        # Если таблиц нет — парсим строки как текстовые данные
+            all_rows = []
+            columns = []
+            for table in doc.tables:
+                header = [cell.text.strip() for cell in table.rows[0].cells]
+                if not columns:
+                    columns = header
+                for row in table.rows[1:]:
+                    row_dict = {}
+                    for j, cell in enumerate(row.cells):
+                        if j < len(columns):
+                            row_dict[columns[j]] = cell.text.strip()
+                    if any(v for v in row_dict.values()):
+                        all_rows.append(row_dict)
+            if all_rows:
+                dtypes = self._infer_dtypes(columns, all_rows[:3])
+                return ParsedData(columns=columns, sample_rows=all_rows[:3], dtypes=dtypes, all_rows=all_rows)
+        # Если таблиц нет — ищем key:value паттерны
         lines = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
         if not lines:
             return ParsedData(columns=[], sample_rows=[], dtypes={})
+        # Пробуем key: value или key - value паттерны
+        kv_rows = {}
+        for line in lines:
+            for sep_char in [":", " - ", "\t"]:
+                if sep_char in line:
+                    parts = line.split(sep_char, 1)
+                    if len(parts) == 2 and len(parts[0].strip()) < 60:
+                        kv_rows[parts[0].strip()] = parts[1].strip()
+                        break
+        if len(kv_rows) >= 2:
+            columns = list(kv_rows.keys())
+            row = kv_rows
+            dtypes = self._infer_dtypes(columns, [row])
+            return ParsedData(columns=columns, sample_rows=[row], dtypes=dtypes, all_rows=[row])
         # Пробуем разделить по табуляции или точке с запятой
         sep = "\t" if "\t" in lines[0] else ";"
         parts = lines[0].split(sep)
         if len(parts) > 1:
             columns = parts
-            rows = []
-            for line in lines[1:4]:
+            all_rows = []
+            for line in lines[1:]:
                 vals = line.split(sep)
                 row_dict = dict(zip(columns, vals))
-                rows.append(row_dict)
-            dtypes = self._infer_dtypes(columns, rows)
-            return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes, separator=sep)
+                all_rows.append(row_dict)
+            dtypes = self._infer_dtypes(columns, all_rows[:3])
+            return ParsedData(columns=columns, sample_rows=all_rows[:3], dtypes=dtypes, separator=sep, all_rows=all_rows)
         # Просто текст — одна колонка
         columns = ["text"]
-        rows = [{"text": line} for line in lines[:3]]
+        all_rows = [{"text": line} for line in lines]
         dtypes = {"text": "string"}
-        return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
+        return ParsedData(columns=columns, sample_rows=all_rows[:3], dtypes=dtypes, all_rows=all_rows)
 
 
 class PdfParser(BaseParser):
@@ -203,18 +221,18 @@ class PdfParser(BaseParser):
             parts = lines[0].split(sep)
             if len(parts) > 1:
                 columns = [p.strip() for p in parts]
-                rows = []
-                for line in lines[1:4]:
+                all_rows = []
+                for line in lines[1:]:
                     vals = [v.strip() for v in line.split(sep)]
                     row_dict = dict(zip(columns, vals))
-                    rows.append(row_dict)
-                dtypes = self._infer_dtypes(columns, rows)
-                return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes, separator=sep)
+                    all_rows.append(row_dict)
+                dtypes = self._infer_dtypes(columns, all_rows[:3])
+                return ParsedData(columns=columns, sample_rows=all_rows[:3], dtypes=dtypes, separator=sep, all_rows=all_rows)
         # Просто текст
         columns = ["text"]
-        rows = [{"text": line} for line in lines[:3]]
+        all_rows = [{"text": line} for line in lines]
         dtypes = {"text": "string"}
-        return ParsedData(columns=columns, sample_rows=rows, dtypes=dtypes)
+        return ParsedData(columns=columns, sample_rows=all_rows[:3], dtypes=dtypes, all_rows=all_rows)
 
 
 PARSERS = {

@@ -22,7 +22,7 @@ def parsed_to_csv(parsed: ParsedData) -> str:
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=parsed.columns)
     writer.writeheader()
-    for row in parsed.sample_rows:
+    for row in parsed.all_rows:
         writer.writerow(row)
     return output.getvalue()
 

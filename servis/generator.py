@@ -9,7 +9,7 @@ GIGACHAT_TOKEN = "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLT
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, markdown, import. Код БРАУЗЕРНЫЙ. Для CSV: atob()+split по разделителю. Для JSON: JSON.parse(atob()). Для XML: new DOMParser(). ЗАПРЕЩЕНО: import, require, fs, Buffer. Функция parseFile(base64:string):T[]."
+SYSTEM_PROMPT = "Только код. Без текста. function parseFile(base64:string):T[]. Браузер: atob,split,JSON.parse,DOMParser. Без import/require/fs/Buffer."
 
 
 def get_access_token() -> str:
@@ -47,7 +47,7 @@ def call_gigachat(system_prompt: str, user_message: str) -> dict:
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.1,
-            "max_tokens": 800,
+            "max_tokens": 600,
         },
         verify=False,
         timeout=120,
@@ -72,19 +72,15 @@ def generate_ts_code(
     file_format: str,
 ) -> dict:
     """Генерирует TypeScript-код на основе структуры файла и целевого JSON."""
-    columns = file_structure.get("columns", [])
-    sample = file_structure.get("sample_rows", [])[:1]
+    cols = file_structure.get("columns", [])
     sep = file_structure.get("separator", ",")
 
-    src = json.dumps({"format": file_format, "separator": sep, "columns": columns, "sample_row": sample[0] if sample else {}}, ensure_ascii=False)
-
+    tgt = "{}"
     if target_json:
         t = target_json[0] if isinstance(target_json, list) and target_json else target_json
         tgt = json.dumps(t, ensure_ascii=False)
-    else:
-        tgt = "{}"
 
-    user_message = f"Формат:{file_format} Разделитель:{sep} Колонки:{columns} Пример строки:{sample[0] if sample else {}} Целевой:{tgt}"
+    user_message = f"{file_format} sep={sep} cols={cols} out={tgt}"
 
     result = call_gigachat(SYSTEM_PROMPT, user_message)
     ts_code = clean_ts_code(result["content"])

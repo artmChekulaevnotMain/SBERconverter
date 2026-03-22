@@ -156,34 +156,59 @@ def generate_ts_code(
 
 
 def clean_ts_code(code: str) -> str:
-    """Убирает markdown-обёртки, пояснения и TS-типы из ответа LLM."""
+    """Убирает markdown-обёртки, пояснения и TS-типы из ответа LLM — возвращает чистый JS."""
     code = re.sub(r"^```(?:typescript|ts|javascript|js)?\s*\n", "", code.strip())
     code = re.sub(r"\n```\s*$", "", code.strip())
-    # Убираем всё после последней закрывающей скобки функции
+
+    # 1. Убираем import строки
+    code = re.sub(r"^\s*import\s+.*?;\s*$", "", code, flags=re.MULTILINE)
+
+    # 2. Убираем type/interface блоки (многострочные)
+    code = re.sub(r"(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?", "", code, flags=re.DOTALL)
+
+    # 3. Построчная обработка
     lines = code.split("\n")
     result = []
     for line in lines:
         if line.startswith("**") or line.startswith("Примечание") or line.startswith("Для работы") or line.startswith("Эта функция"):
             break
-        # Убираем TS-типы из объявления функции: function name(x: string): ReturnType { → function name(x) {
-        if re.match(r'\s*function\s+\w+\s*\(', line):
-            line = re.sub(
-                r'^(\s*)function\s+(\w+)\s*\(([^)]*)\).*$',
-                lambda m: '{indent}function {name}({params}) {{'.format(
-                    indent=m.group(1),
-                    name=m.group(2),
-                    params=re.sub(r'(\w+)\s*:\s*[^,)]+', r'\1', m.group(3)),
-                ),
-                line,
-            )
-        # const x: Type = → const x =
-        line = re.sub(r'(const|let|var)\s+(\w+)\s*:\s*\S+\s*=', r'\1 \2 =', line)
-        # Убираем as Type
+
+        # Убираем async function name(x: string): Promise<T[]> { → async function name(x) {
+        fn_match = re.match(r'^(\s*)((?:async\s+)?function\s+)(\w+)\s*\(([^)]*)\)\s*:.*$', line)
+        if fn_match:
+            indent = fn_match.group(1)
+            prefix = fn_match.group(2)  # "function " или "async function "
+            name = fn_match.group(3)
+            params = re.sub(r'(\w+)\s*:\s*[^,)]+', r'\1', fn_match.group(4))
+            line = f'{indent}{prefix}{name}({params}) {{'
+
+        # const x: Type[] = → const x =
+        line = re.sub(r'(const|let|var)\s+(\w+)\s*:\s*\S+(?:\[\])?\s*=', r'\1 \2 =', line)
+
+        # Убираем as Type / as Type[]
         line = re.sub(r'\s+as\s+\w+(?:\[\])?', '', line)
+
+        # Убираем <Type> в вызовах: fn<Type>( → fn(
+        line = re.sub(r'(\w)\s*<[^>]+>\s*\(', r'\1(', line)
+
         result.append(line)
+
     code = "\n".join(result).strip()
-    # Убираем interface/type блоки
-    code = re.sub(r'(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?', '', code, flags=re.DOTALL)
+
+    # Заменяем дублирующиеся _ в деструктуризации: [_, a, _, b] → [_1, a, _2, b]
+    def fix_duplicate_underscores(m):
+        inner = m.group(1)
+        counter = [0]
+        def replace_underscore(um):
+            counter[0] += 1
+            return f'_{counter[0]}'
+        fixed = re.sub(r'\b_\b', replace_underscore, inner)
+        return f'[{fixed}]'
+    code = re.sub(r'\[([^\]]*\b_\b[^\]]*\b_\b[^\]]*)\]', fix_duplicate_underscores, code)
+
+    # Убираем пустые строки подряд (после удаления import/type)
+    code = re.sub(r'\n{3,}', '\n\n', code)
+
     # Заключаем не-ASCII ключи объектов в кавычки: №: → "№":
     code = re.sub(r'(?<=[\{,\n])\s*([^\x00-\x7F][\w%\s]*)\s*:', lambda m: f' "{m.group(1).strip()}":', code)
     return code

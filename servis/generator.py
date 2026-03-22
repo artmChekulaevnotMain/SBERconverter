@@ -157,7 +157,7 @@ def generate_ts_code(
 
 def clean_ts_code(code: str) -> str:
     """Убирает markdown-обёртки и пояснения из ответа LLM."""
-    code = re.sub(r"^```(?:typescript|ts)?\s*\n", "", code.strip())
+    code = re.sub(r"^```(?:typescript|ts|javascript|js)?\s*\n", "", code.strip())
     code = re.sub(r"\n```\s*$", "", code.strip())
     # Убираем всё после последней закрывающей скобки функции
     lines = code.split("\n")

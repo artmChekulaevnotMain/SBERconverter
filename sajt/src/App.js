@@ -97,7 +97,8 @@ function App() {
     js = js.replace(/(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?/gs, '');
     // 2. Убираем export default
     js = js.replace(/export\s+default\s+/g, '');
-    // 3. Убираем return type функции: ): Type[] { → ) {
+    // 3. Убираем return type функции: ): { ... }[] { → ) {  и  ): Type[] { → ) {
+    js = js.replace(/\)\s*:\s*\{[^}]*\}(?:\[\])?\s*\{/g, ') {');
     js = js.replace(/\)\s*:\s*[A-Za-z][\w.<>,\s|]*(?:\[\])?\s*\{/g, ') {');
     // 4. Убираем типы параметров: (param: string, param2: number)
     js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,)])/g, '$1$2');

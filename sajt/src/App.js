@@ -92,22 +92,23 @@ function App() {
   };
 
   const stripTypes = (code) => {
-    // Убираем interface/type блоки
-    let js = code.replace(/(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?/gs, '');
-    // Убираем export default
+    let js = code;
+    // 1. Убираем interface/type блоки
+    js = js.replace(/(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?/gs, '');
+    // 2. Убираем export default
     js = js.replace(/export\s+default\s+/g, '');
-    // Убираем аннотации типов: ": Type", ": Type[]", ": Record<string, any>", "as Type"
-    js = js.replace(/:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>/g, '');
-    js = js.replace(/:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,;)={\n])/g, '');
-    js = js.replace(/:\s*\w+\[\]\s*(?=[,;)={\n])/g, '');
-    js = js.replace(/:\s*\w+\s*(?=[,;)={\n])/g, function(match) {
-      if (/:\s*(const|let|var|return|if|else|for|while|new|typeof|void|null|undefined|true|false|function)\b/.test(match)) return match;
-      return '';
-    });
-    js = js.replace(/\bas\s+\w+/g, '');
-    // Убираем дженерики
-    js = js.replace(/<\w+(?:\[\])?>/g, '');
-    // event.target?.result — оставляем optional chaining
+    // 3. Убираем return type функции: ): Type[] { → ) {
+    js = js.replace(/\)\s*:\s*[A-Za-z][\w.<>,\s|]*(?:\[\])?\s*\{/g, ') {');
+    // 4. Убираем типы параметров: (param: string, param2: number)
+    js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,)])/g, '$1$2');
+    js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>\s*(?=[,)])/g, '$1$2');
+    // 5. Убираем типы переменных: const x: Type = → const x =
+    js = js.replace(/(const|let|var)\s+(\w+)\s*:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>\s*=/g, '$1 $2 =');
+    js = js.replace(/(const|let|var)\s+(\w+)\s*:\s*[A-Za-z][\w]*(?:\[\])?\s*=/g, '$1 $2 =');
+    // 6. Убираем as Type
+    js = js.replace(/\s+as\s+\w+(?:\[\])?/g, '');
+    // 7. Убираем дженерики у вызовов: fn<Type>( → fn(
+    js = js.replace(/(\w)\s*<\s*\w+(?:\[\])?\s*>\s*\(/g, '$1(');
     return js;
   };
 
@@ -128,9 +129,12 @@ function App() {
         });
       }
       let jsCode = stripTypes(tsCode);
+      // Заменяем atob на UTF-8 безопасный декодер
+      const utf8Helper = 'function _u8d(b){var d=atob(b),u=new Uint8Array(d.length);for(var i=0;i<d.length;i++)u[i]=d.charCodeAt(i);return new TextDecoder("utf-8").decode(u);}\n';
+      jsCode = utf8Helper + jsCode.replace(/\batob\s*\(/g, '_u8d(');
       // eslint-disable-next-line no-new-func
-      const fn = new Function('base64File', 'XLSX', jsCode + '\nreturn parseFile(base64File);');
-      const result = fn(base64, window.XLSX);
+      const fn = new Function('base64File', jsCode + '\nreturn parseFile(base64File);');
+      const result = fn(base64);
       // Если результат — Promise, ждём его
       const finalResult = result instanceof Promise ? await result : result;
       setExecResult(finalResult);

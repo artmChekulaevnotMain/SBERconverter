@@ -9,7 +9,7 @@ GIGACHAT_TOKEN = "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLT
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, комментариев, markdown. Функция parseFile(base64:string):T[] — декодирует base64, парсит исходный файл, маппит в целевой JSON."
+SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, markdown, import. Код БРАУЗЕРНЫЙ: используй atob() для base64, String.split для CSV, DOMParser для XML, JSON.parse для JSON. ЗАПРЕЩЕНО: import, require, fs, Buffer, xlsx, node.js. Функция parseFile(base64:string):T[] парсит ИСХОДНЫЙ файл и маппит в целевой JSON."
 
 
 def get_access_token() -> str:
@@ -84,7 +84,7 @@ def generate_ts_code(
     else:
         tgt = "{}"
 
-    user_message = f"Формат:{file_format} Колонки:{columns} Целевой:{tgt}"
+    user_message = f"Формат:{file_format} Разделитель:{sep} Колонки:{columns} Пример строки:{sample[0] if sample else {}} Целевой:{tgt}"
 
     result = call_gigachat(SYSTEM_PROMPT, user_message)
     ts_code = clean_ts_code(result["content"])

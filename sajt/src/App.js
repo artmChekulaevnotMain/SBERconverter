@@ -101,11 +101,14 @@ function App() {
         // Пропускаем до закрывающей }
         continue;
       }
-      // function parseFile(base64: string): ... { → function parseFile(base64) {
-      line = line.replace(/function\s+(\w+)\s*\(([^)]*)\)\s*:.*\{/, (m, name, params) => {
-        const clean = params.replace(/(\w+)\s*:\s*[^,)]+/g, '$1');
-        return `function ${name}(${clean}) {`;
-      });
+      // function parseFile(base64: string): ... → function parseFile(base64) {
+      // Заменяем ВСЮ строку с объявлением функции (включая return type)
+      if (/^\s*function\s+\w+\s*\(/.test(line)) {
+        line = line.replace(/^(\s*)function\s+(\w+)\s*\(([^)]*)\).*$/, (m, indent, name, params) => {
+          const clean = params.replace(/(\w+)\s*:\s*[^,)]+/g, '$1');
+          return `${indent}function ${name}(${clean}) {`;
+        });
+      }
       // Стрелочные функции с типом: (x: string) => → (x) =>
       line = line.replace(/(\(|,\s*)(\w+)\s*:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,)])/g, '$1$2');
       // const x: Type = → const x =

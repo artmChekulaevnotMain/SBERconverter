@@ -97,9 +97,13 @@ function App() {
     js = js.replace(/(?:export\s+)?(?:interface|type)\s+\w+\s*=?\s*\{[^}]*\};?/gs, '');
     // 2. Убираем export default
     js = js.replace(/export\s+default\s+/g, '');
-    // 3. Убираем return type функции: ): { ... }[] { → ) {  и  ): Type[] { → ) {
-    js = js.replace(/\)\s*:\s*\{[^}]*\}(?:\[\])?\s*\{/g, ') {');
-    js = js.replace(/\)\s*:\s*[A-Za-z][\w.<>,\s|]*(?:\[\])?\s*\{/g, ') {');
+    // 3. Убираем return type: function parseFile(base64: string): ... {
+    // Находим "function имя(" и убираем всю типизацию из сигнатуры
+    js = js.replace(/function\s+(\w+)\s*\(([^)]*)\)\s*:[^{]*/g, (match, name, params) => {
+      // Убираем типы из параметров: base64: string → base64
+      const cleanParams = params.replace(/(\w+)\s*:\s*[^,)]+/g, '$1');
+      return `function ${name}(${cleanParams}) `;
+    });
     // 4. Убираем типы параметров: (param: string, param2: number)
     js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:string|number|boolean|any|void|never|unknown)(?:\[\])?\s*(?=[,)])/g, '$1$2');
     js = js.replace(/(\(|,\s*)(\w+)\s*:\s*(?:Record|Map|Set|Array|Promise)<[^>]*>\s*(?=[,)])/g, '$1$2');

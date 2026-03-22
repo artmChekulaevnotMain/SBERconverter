@@ -11,6 +11,8 @@ function App() {
   const [tokensUsed, setTokensUsed] = useState(0);
   const [showResult, setShowResult] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [execResult, setExecResult] = useState(null);
+  const [execError, setExecError] = useState('');
 
   const handleDrop = useCallback((e, setter) => {
     e.preventDefault();
@@ -87,6 +89,41 @@ function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleExecute = async () => {
+    if (!dataFile || !tsCode) return;
+    setExecError('');
+    setExecResult(null);
+    try {
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.readAsDataURL(dataFile);
+      });
+      // Убираем TypeScript-типы и export для выполнения как JS
+      let jsCode = tsCode
+        .replace(/:\s*string/g, '')
+        .replace(/:\s*number/g, '')
+        .replace(/:\s*boolean/g, '')
+        .replace(/:\s*any/g, '')
+        .replace(/:\s*\w+\[\]/g, '')
+        .replace(/:\s*\w+/g, function(match) {
+          if (match.match(/:\s*(const|let|var|return|if|else|for|while|new|typeof|void|null|undefined|true|false|function|switch|case|break|default|throw|try|catch|finally)\b/)) return match;
+          return '';
+        })
+        .replace(/interface\s+\w+\s*\{[^}]*\}/g, '')
+        .replace(/export\s+default\s+/g, '')
+        .replace(/<[A-Z]\w*>/g, '');
+      // eslint-disable-next-line no-new-func
+      const fn = new Function('base64File', jsCode.includes('function parseFile')
+        ? jsCode + '\nreturn parseFile(base64File);'
+        : jsCode + '\nreturn parseFile(base64File);');
+      const result = fn(base64);
+      setExecResult(result);
+    } catch (err) {
+      setExecError('Ошибка выполнения: ' + err.message);
+    }
+  };
+
   const handleDownload = () => {
     const blob = new Blob([tsCode], { type: 'text/typescript' });
     const url = URL.createObjectURL(blob);
@@ -142,6 +179,23 @@ function App() {
           {tokensUsed > 0 && (
             <div className="tokens-info">
               Использовано токенов: ~{tokensUsed}
+            </div>
+          )}
+
+          <button className="execute-btn" onClick={handleExecute}>
+            Выполнить код
+          </button>
+
+          {execError && <div className="error-msg">{execError}</div>}
+
+          {execResult && (
+            <div className="code-section">
+              <div className="code-header">
+                <span>Результат выполнения (JSON)</span>
+              </div>
+              <pre className="code-block result-block">
+                <code>{JSON.stringify(execResult, null, 2)}</code>
+              </pre>
             </div>
           )}
 

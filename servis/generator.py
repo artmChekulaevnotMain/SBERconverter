@@ -1,13 +1,21 @@
 """Генератор TypeScript-кода через GigaChat API напрямую."""
 import json
 import re
+import time
 import requests
 import uuid
+from langfuse import Langfuse
 
 GIGACHAT_TOKEN = "MDE5Y2ZiNmYtZGFkZC03YjYwLWFlN2MtN2IwMWJlOTZiZTY3OmJiZjJhNWFkLTgxMTUtNGYwZC1iNzAyLWVkYjg4Y2UxNDI4YQ=="
 
 AUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 API_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+
+langfuse = Langfuse(
+    public_key="pk-lf-98279f8f-10d5-4cfb-b96c-c9c30ed6eaac",
+    secret_key="sk-lf-dfb386f4-7d40-46f9-8950-5c67ebca0b4f",
+    host="https://cloud.langfuse.com",
+)
 
 SYSTEM_PROMPT = "Верни ТОЛЬКО TypeScript-код. БЕЗ примечаний, пояснений, markdown, import. Код БРАУЗЕРНЫЙ. Для CSV: atob()+split по разделителю. Для JSON: JSON.parse(atob()). Для XML: new DOMParser(). ЗАПРЕЩЕНО: import, require, fs, Buffer. Функция parseFile(base64:string):T[]."
 
@@ -31,7 +39,19 @@ def get_access_token() -> str:
 
 def call_gigachat(system_prompt: str, user_message: str) -> dict:
     """Вызывает GigaChat API и возвращает ответ."""
+    trace = langfuse.trace(name="gigachat-generate", metadata={"model": "GigaChat-2-Max"})
+    generation = trace.generation(
+        name="ts-code-generation",
+        model="GigaChat-2-Max",
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        model_parameters={"temperature": 0.1, "max_tokens": 800},
+    )
+
     token = get_access_token()
+    start_time = time.time()
 
     response = requests.post(
         API_URL,
@@ -54,9 +74,21 @@ def call_gigachat(system_prompt: str, user_message: str) -> dict:
     )
     response.raise_for_status()
     data = response.json()
+    latency = time.time() - start_time
 
     content = data["choices"][0]["message"]["content"]
     usage = data.get("usage", {})
+
+    generation.end(
+        output=content,
+        usage={
+            "input": usage.get("prompt_tokens", 0),
+            "output": usage.get("completion_tokens", 0),
+            "total": usage.get("total_tokens", 0),
+        },
+        metadata={"latency_seconds": round(latency, 2)},
+    )
+    langfuse.flush()
 
     return {
         "content": content,
